@@ -45,9 +45,73 @@ def run_script(script_name, script_args):
 
 def execute_command(command, command_args):
     """Execute internal function calls or specific internal commands."""
+    import os
+    workspace = os.getcwd()
+    db_path = os.path.join(workspace, 'agy_nodeos.db')
+
+    def run_blast(args):
+        from polymath_nodeos.scripts.blast_radius_engine import BlastRadiusEngine
+        if not args:
+            print("Usage: nodeos -c blast <filepath>")
+            return
+        engine = BlastRadiusEngine(db_path=db_path, workspace=workspace)
+        print(f"Blast radius for {args[0]}: {engine.get_blast_radius(args[0])}")
+
+    def run_ghost(args):
+        from polymath_nodeos.scripts.ghost_writer_engine import GhostWriterEngine
+        if not args:
+            print("Usage: nodeos -c ghost <filepath>")
+            return
+        engine = GhostWriterEngine(workspace_root=workspace)
+        centroid = engine.calculate_centroid(args[0])
+        if centroid:
+            neighbors = engine.find_nearest_neighbors(centroid[0], centroid[1], args[0])
+            print(f"Nearest neighbors for {args[0]}: {neighbors}")
+        else:
+            print("Could not calculate centroid.")
+
+    def run_dead(args):
+        from polymath_nodeos.scripts.dead_code_engine import SemanticDeadCodeEngine
+        engine = SemanticDeadCodeEngine(db_path=db_path, workspace_root=workspace)
+        orphans = engine.find_orphaned_nodes()
+        print(f"Dead code nodes: {len(orphans)} found.")
+        for o in orphans:
+            print(f" - [{o.node_type}] {o.node_id} in {o.filepath}")
+
+    def run_domino(args):
+        from polymath_nodeos.scripts.domino_engine import DominoEngine
+        if len(args) < 2:
+            print("Usage: nodeos -c domino <old_symbol> <new_symbol>")
+            return
+        engine = DominoEngine(db_path=db_path)
+        engine.refactor(args[0], args[1])
+        print(f"Refactored {args[0]} to {args[1]}")
+
+    def run_swarm(args):
+        # We need to pass args to the swarm_engine.
+        # This is tricky because of asyncio.
+        # Let's just run it via subprocess to avoid asyncio complexity in cli.py
+        import subprocess
+        # Assuming swarm_engine.py is in scripts
+        script_path = os.path.join(os.path.dirname(__file__), 'scripts', 'swarm_engine.py')
+        subprocess.run([sys.executable, script_path] + args)
+
+    def run_sentinel(args):
+        if len(args) < 1:
+            print("Usage: nodeos -c sentinel <function_name>")
+            return
+        from polymath_nodeos.scripts.sentinel_engine import SentinelEngine
+        engine = SentinelEngine(db_path=db_path)
+        engine.mark_brittle(args[0])
+
     commands = {
         "ping": lambda args: _ping_daemon(),
-        # Add future internal commands here
+        "blast": run_blast,
+        "ghost": run_ghost,
+        "dead": run_dead,
+        "domino": run_domino,
+        "swarm": run_swarm,
+        "sentinel": run_sentinel,
     }
     
     if command in commands:

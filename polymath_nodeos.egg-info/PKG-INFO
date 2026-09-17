@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: polymath-nodeos
-Version: 1.0.2
+Version: 1.0.5
 Summary: A zero-dependency Autonomous Agentic Swarm Operating System.
 Author: Polymath Void
 License: MIT
@@ -58,6 +58,12 @@ pip install polymath-nodeos
 1. Installs the `nodeos` CLI globally.
 2. Allows you to instantly boot the Swarm OS in any folder.
 3. Automatically triggers your swarm agents to read `workflow.json`.
+
+After pip installing, you must run the Antigravity integration setup once:
+```bash
+nodeos --install
+```
+This automatically maps NodeOS directly into your AI Agent's global memory (`~/.gemini/config/`), granting them the `nodeos_standard.md` rule and `agy-nodeos-installer` injection protocols.
 
 ---
 

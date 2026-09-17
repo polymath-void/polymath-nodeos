@@ -3,7 +3,9 @@ pyproject.toml
 polymath_nodeos/__init__.py
 polymath_nodeos/cli.py
 polymath_nodeos/daemon.py
+polymath_nodeos/dummy_test.py
 polymath_nodeos/graph_manager.py
+polymath_nodeos/installer.py
 polymath_nodeos/jage_engine.py
 polymath_nodeos/nodes_engine.py
 polymath_nodeos.egg-info/PKG-INFO
@@ -21,4 +23,6 @@ polymath_nodeos/scripts/intent_injector.py
 polymath_nodeos/scripts/intent_stopper.py
 polymath_nodeos/scripts/ipc_hook.py
 polymath_nodeos/scripts/legacy_math.py
+polymath_nodeos/scripts/sentinel_engine.py
+polymath_nodeos/scripts/swarm_engine.py
 polymath_nodeos/scripts/telemetry.py
