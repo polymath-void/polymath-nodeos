@@ -39,3 +39,8 @@ Instead, rely on the native Graph Database by querying the search utility:
 python nodeos_search.py "<TargetClassNameOrFunction>"
 ```
 This utility natively computes K-Nearest Neighbors (KNN) from the QuadTree physics matrix and pulls edge targets, providing you with a clean JSON payload of both direct code dependencies and physical spatial neighbors (blast radius context).
+
+## 6. Context Sub-Parent Node Protocol
+The workspace utilizes a deduplicating context engine natively built into NodeOS.
+- **Writing Context:** When reasoning or discovering new facts, you must append them to `context.md` at the workspace root, using standard Markdown headers (e.g., `## 1. Task State`, `## 2. Discovered Entities`, `## 3. Working Memory`).
+- **Reading Context:** The background daemon intercepts `context.md` edits and writes them cleanly into `agy_nodeos.db`. Do not read `context.md`; instead query SQLite for nodes with `node_type` like `CONTEXT_%` to retrieve accurate, deduplicated state.
