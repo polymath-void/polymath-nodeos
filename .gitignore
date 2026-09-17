@@ -1,5 +1,12 @@
 __pycache__/
 *.pyc
+*.pyo
+build/
+dist/
+*.egg-info/
+glibc/
+*.so
+*.so.*
 agy_nodeos.db
 daemon.log
 mcp_debug.log
