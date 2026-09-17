@@ -71,7 +71,7 @@ class GhostWriterEngine:
                 try:
                     with open(schema_path, 'r', encoding='utf-8') as f:
                         schema_data = json.load(f)
-                        signature = schema_data.get('source', '')
+                        signature = schema_data.get('skeleton', schema_data.get('source', ''))
                 except (json.JSONDecodeError, IOError) as e:
                     logger.warning(f"Failed to read AST schema for node {node_id}: {e}")
             else:

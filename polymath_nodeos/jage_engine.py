@@ -4,6 +4,7 @@ import json
 import os
 import re
 import sys
+import copy
 
 class JageASTEngine:
     """
@@ -55,6 +56,14 @@ class JageASTEngine:
                         elif isinstance(sub_node.func, ast.Attribute):
                             calls.append(sub_node.func.attr)
                             
+                node_copy = copy.deepcopy(node)
+                if hasattr(node_copy, 'body'):
+                    node_copy.body = [ast.Pass()]
+                try:
+                    skeleton = ast.unparse(node_copy)
+                except Exception:
+                    skeleton = f"# signature for {node.name}\npass"
+
                 node_data = {
                     "type": type(node).__name__,
                     "name": node.name,
@@ -64,39 +73,66 @@ class JageASTEngine:
                     "calls": list(set(calls))
                 }
                 nodes.append(node_data)
-                self._store_schema(node_hash, node_data, node_source)
+                self._store_schema(node_hash, node_data, node_source, skeleton)
         return nodes
 
     def _parse_javascript(self, filepath):
-        """A simple Regex fallback for Polyglot JS/TS parsing since tree-sitter C-linkage fails on Termux."""
+        """A Stack-Based Bracket Matcher fallback for Polyglot JS/TS parsing."""
         with open(filepath, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
+            content = f.read()
 
         nodes = []
-        pattern = re.compile(r'^(?:export\s+)?(?:async\s+)?(?:function|class)\s+([a-zA-Z0-9_]+)')
+        pattern = re.compile(r'(?:export\s+)?(?:async\s+)?(?:function|class)\s+([a-zA-Z0-9_]+)[^{]*{')
         
-        for i, line in enumerate(lines):
-            match = pattern.search(line)
-            if match:
-                name = match.group(1)
-                node_source = line.strip() # Simplified extraction
-                node_hash = self.hash_content(node_source)
-                node_data = {
-                    "type": "JS_Node",
-                    "name": name,
-                    "hash": node_hash,
-                    "file": filepath,
-                    "line_number": i + 1
-                }
-                nodes.append(node_data)
-                self._store_schema(node_hash, node_data, node_source)
+        for match in pattern.finditer(content):
+            name = match.group(1)
+            start_idx = match.start()
+            
+            brace_start = content.find('{', start_idx)
+            if brace_start == -1: continue
+            
+            stack = 0
+            end_idx = brace_start
+            for i in range(brace_start, len(content)):
+                if content[i] == '{': stack += 1
+                elif content[i] == '}': stack -= 1
+                if stack == 0:
+                    end_idx = i + 1
+                    break
+            
+            if stack != 0:
+                end_idx = len(content)
+                
+            node_source = content[start_idx:end_idx]
+            node_hash = self.hash_content(node_source)
+            skeleton = content[start_idx:brace_start].strip() + " { ... }"
+            
+            calls = []
+            call_pattern = re.compile(r'([a-zA-Z0-9_]+)\s*\(')
+            for call_match in call_pattern.finditer(node_source):
+                call_name = call_match.group(1)
+                if call_name not in ['if', 'for', 'while', 'switch', 'catch', 'function']:
+                    calls.append(call_name)
+                    
+            node_data = {
+                "type": "JS_Node",
+                "name": name,
+                "hash": node_hash,
+                "file": filepath,
+                "line_number": content[:start_idx].count('\n') + 1,
+                "calls": list(set(calls))
+            }
+            nodes.append(node_data)
+            self._store_schema(node_hash, node_data, node_source, skeleton)
+            
         return nodes
 
-    def _store_schema(self, node_hash, metadata, source):
+    def _store_schema(self, node_hash, metadata, source, skeleton=None):
         schema_path = os.path.join(self.schema_dir, f"{node_hash}.json")
         data = {
             "metadata": metadata,
-            "source": source
+            "source": source,
+            "skeleton": skeleton if skeleton else source
         }
         with open(schema_path, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=4)

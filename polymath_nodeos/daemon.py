@@ -51,7 +51,7 @@ class AGYRawWatchdog:
                 if self._should_ignore(root):
                     continue
                 for file in files:
-                    if file.endswith(('.py', '.json')):
+                    if file.endswith(('.py', '.json')) or file == 'context.md':
                         path = os.path.join(root, file)
                         current_files.add(path)
                         try:
@@ -81,6 +81,15 @@ class AGYNodeOSEventHandler:
         if event_type in ("created", "modified"):
             print(f"\n[Daemon] Detected {event_type} in: {filepath}")
             
+            if os.path.basename(filepath) == "context.md":
+                print(f"[Daemon] Context modified. Initiating reasoning & sync...")
+                try:
+                    from polymath_nodeos.scripts.context_engine import ContextEngine
+                    ContextEngine(self.graph.db_path).process_and_sync(filepath)
+                except Exception as e:
+                    print(f"[Swarm OS] Context Engine failed: {e}")
+                return
+
             if filepath.endswith('.json'):
                 print(f"[Event Loop] Picked up agent JSON workflow from {filepath}!")
                 asyncio.run_coroutine_threadsafe(
