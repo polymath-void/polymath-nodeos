@@ -16,6 +16,7 @@ polymath_nodeos.egg-info/top_level.txt
 polymath_nodeos/scripts/__init__.py
 polymath_nodeos/scripts/agy_invoke.py
 polymath_nodeos/scripts/blast_radius_engine.py
+polymath_nodeos/scripts/context_engine.py
 polymath_nodeos/scripts/dead_code_engine.py
 polymath_nodeos/scripts/domino_engine.py
 polymath_nodeos/scripts/ghost_writer_engine.py

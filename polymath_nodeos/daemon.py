@@ -71,11 +71,12 @@ class AGYRawWatchdog:
                 del self.state[path]
 
 class AGYNodeOSEventHandler:
-    def __init__(self, jage, spatial, graph, loop):
+    def __init__(self, jage, spatial, graph, loop, workspace=None):
         self.jage = jage
         self.spatial = spatial
         self.graph = graph
         self.loop = loop
+        self.workspace = workspace or os.getcwd()
 
     def on_event(self, filepath, event_type):
         if event_type in ("created", "modified"):
@@ -107,7 +108,7 @@ class AGYNodeOSEventHandler:
             if event_type == "modified":
                 try:
                     from polymath_nodeos.scripts.blast_radius_engine import BlastRadiusEngine
-                    br_engine = BlastRadiusEngine(db_path=self.graph.db_path, workspace=self.graph.workspace, threshold=10)
+                    br_engine = BlastRadiusEngine(db_path=self.graph.db_path, workspace=self.workspace, threshold=10)
                     br_engine.enforce_threshold(filepath)
                 except Exception as e:
                     print(f"[Swarm OS] Blast Radius Engine failed: {e}")
@@ -115,7 +116,7 @@ class AGYNodeOSEventHandler:
             elif event_type == "created":
                 try:
                     from polymath_nodeos.scripts.ghost_writer_engine import GhostWriterEngine
-                    gw_engine = GhostWriterEngine(workspace_root=self.graph.workspace, db_name=self.graph.db_path)
+                    gw_engine = GhostWriterEngine(workspace_root=self.workspace, db_name=self.graph.db_path)
                     gw_engine.execute_pipeline(filepath)
                 except Exception as e:
                     print(f"[Swarm OS] Ghost Writer Engine failed: {e}")
@@ -216,7 +217,7 @@ Whenever operating inside this NodeOS-managed workspace, you MUST follow these c
         self.spatial = NativeNodesEngine()
         self.loop = asyncio.new_event_loop()
         
-        self.event_handler = AGYNodeOSEventHandler(self.jage, self.spatial, self.graph, self.loop)
+        self.event_handler = AGYNodeOSEventHandler(self.jage, self.spatial, self.graph, self.loop, workspace=self.workspace)
         
         # Initialize our zero-dependency raw watchdog
         self.raw_watchdog = AGYRawWatchdog(self.workspace, self.event_handler.on_event, interval=1.0)
