@@ -104,6 +104,33 @@ def execute_command(command, command_args):
         engine = SentinelEngine(db_path=db_path)
         engine.mark_brittle(args[0])
 
+    def run_qa(args):
+        from polymath_nodeos.scripts.qa_engine import QAEngine
+        target = args[0] if args else workspace
+        engine = QAEngine()
+        engine.run(target)
+        engine.report()
+
+    def run_search(args):
+        import sqlite3
+        if not args:
+            print("Usage: nodeos -c search <symbol>")
+            return
+        symbol = args[0]
+        con = sqlite3.connect(db_path)
+        try:
+            rows = con.execute(
+                "SELECT node_type, name, filepath FROM nodes WHERE name LIKE ?",
+                (f"%{symbol}%",),
+            ).fetchall()
+        finally:
+            con.close()
+        if not rows:
+            print(f"No results for '{symbol}'.")
+            return
+        for node_type, name, filepath in rows:
+            print(f"Found [{node_type}] {name} in {filepath}")
+
     commands = {
         "ping": lambda args: _ping_daemon(),
         "blast": run_blast,
@@ -112,6 +139,8 @@ def execute_command(command, command_args):
         "domino": run_domino,
         "swarm": run_swarm,
         "sentinel": run_sentinel,
+        "qa": run_qa,
+        "search": run_search,
     }
     
     if command in commands:
