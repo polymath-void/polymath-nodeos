@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import asyncio
 import os
+import sqlite3
 import sys
 
 # We are now a fully packaged module. No sys.path hacking required.
@@ -27,10 +28,20 @@ class AGYRawWatchdog:
         self.running = False
         self._initialize_state()
 
+    # Internal OS state folders and vendored dependencies. Matched as exact path
+    # SEGMENTS, never as substrings: 'env' in path would also skip a real project
+    # named 'env-tools', and 'build' would skip 'buildserver/'.
+    IGNORED_DIR_SEGMENTS = frozenset({
+        '.jsagent', '.agents', '__pycache__', '.git', 'node_modules',
+        'build', 'dist', '.venv', 'venv', '.build_cache', 'site-packages', 'env',
+    })
+
     def _should_ignore(self, path):
-        # Ignore internal OS state folders and dependencies to prevent recursive loops and bloat
-        ignores = ['.jsagent', '.agents', '__pycache__', '.git', 'node_modules', 'build', 'dist', '.venv', 'venv', '.build_cache', 'site-packages', 'env']
-        return any(ign in path for ign in ignores)
+        try:
+            parts = os.path.normpath(path).split(os.sep)
+        except (TypeError, ValueError):
+            return False
+        return any(part in self.IGNORED_DIR_SEGMENTS for part in parts)
 
     def _initialize_state(self):
         for root, _, files in os.walk(self.directory):
@@ -100,8 +111,9 @@ class AGYNodeOSEventHandler:
             
             ast_nodes = self.jage.parse_file(filepath)
             if ast_nodes:
-                for node in ast_nodes:
-                    self.spatial.add_node(node['hash'], node['type'], node.get('name', 'unknown'), node.get('calls', []), filepath=filepath)
+                # Single shared ingestion path (Category C) — the cold-start scan uses the
+                # same method, so the two cannot drift apart again.
+                self.spatial.ingest_file(filepath, ast_nodes)
                 self.spatial.resolve_edges()
                 
             # -- BEGIN NEW SWARM OS FEATURES --
@@ -112,6 +124,16 @@ class AGYNodeOSEventHandler:
                     br_engine.enforce_threshold(filepath)
                 except Exception as e:
                     print(f"[Swarm OS] Blast Radius Engine failed: {e}")
+                    
+                if filepath.endswith(('.py', '.kt', '.js', '.ts')):
+                    try:
+                        from polymath_nodeos.scripts.qa_engine import QAEngine
+                        qa_engine = QAEngine()
+                        errors, _ = qa_engine.run(filepath)
+                        if errors:
+                            print(f"[Swarm OS] Real-time QA caught structural errors in {filepath}: {errors}")
+                    except Exception as e:
+                        print(f"[Swarm OS] QA Engine failed: {e}")
                     
             elif event_type == "created":
                 try:
@@ -170,6 +192,25 @@ class AGYNodeOSEventHandler:
                                 
                             with open(workflow_file, 'w') as f: json.dump(workflow, f, indent=4)
                             print(f"[Event Loop] Jage Re-Stitch workflow completed.")
+                            continue
+                            
+                        if workflow.get('action') == 'qa':
+                            target = workflow.get('target', self.workspace)
+                            print(f"[Swarm Dispatcher] Processing QA request for {target}...")
+                            workflow['status'] = 'running'
+                            with open(workflow_file, 'w') as f: json.dump(workflow, f, indent=4)
+                            
+                            from polymath_nodeos.scripts.qa_engine import QAEngine
+                            qa_engine = QAEngine()
+                            errors, warnings = qa_engine.run(target)
+                            
+                            if not errors:
+                                workflow['status'] = 'completed'
+                            else:
+                                workflow['status'] = 'failed_qa'
+                                workflow['error_log'] = errors
+                                
+                            with open(workflow_file, 'w') as f: json.dump(workflow, f, indent=4)
                             continue
                             
                         # Handle Swarm Agent execution
@@ -242,9 +283,78 @@ Whenever operating inside this NodeOS-managed workspace, you MUST follow these c
             print("[System] IPC Address 6000 already in use. A daemon is already running! Terminating duplicate process.")
             os._exit(1)
 
+    # Node types that MUST carry a filepath. CONTEXT_* nodes are memory records and are
+    # legitimately file-less, so they are excluded from the corruption check and the purge.
+    CODE_NODE_TYPES = ("FunctionDef", "AsyncFunctionDef", "ClassDef", "JS_Node")
+
+    def purge_orphan_filepath_nodes(self):
+        """Drops code nodes whose filepath is NULL. They cannot be attributed to a source
+        file, so they only poison the graph. CONTEXT_* memory nodes are left untouched."""
+        types_sql = ",".join("?" * len(self.CODE_NODE_TYPES))
+        conn = sqlite3.connect(self.graph.db_path)
+        cur = conn.cursor()
+        before = cur.execute(
+            f"SELECT COUNT(*) FROM nodes WHERE filepath IS NULL AND node_type IN ({types_sql})",
+            self.CODE_NODE_TYPES,
+        ).fetchone()[0]
+        if before:
+            cur.execute(
+                f"DELETE FROM nodes WHERE filepath IS NULL AND node_type IN ({types_sql})",
+                self.CODE_NODE_TYPES,
+            )
+            cur.execute("""
+                DELETE FROM edges WHERE
+                source_id NOT IN (SELECT node_id FROM nodes) OR
+                target_id NOT IN (SELECT node_id FROM nodes)
+            """)
+            conn.commit()
+        conn.close()
+        if before:
+            print(f"[NodeOS] Purged {before} orphaned nodes with NULL filepath from the graph.")
+
     def cold_start_ingestion(self):
-        if len(self.spatial.all_nodes) == 0:
-            print("[NodeOS] Detected Uninitialized Project Workspace. Initiating Deep Ingestion...")
+        # Retire rows whose source file no longer exists. Deletions that happened while the
+        # daemon was stopped are otherwise undetectable — hydration cannot tell an orphaned
+        # row from a live one, and the writes in this engine never subtract (Category A).
+        self.spatial.prune_vanished_files()
+        # Retire rows for files that still exist but whose symbols changed. Without this,
+        # a boot whose graph looks healthy skips the deep scan, so superseded rows pile up
+        # silently and are re-hydrated forever (Category A / bug 12).
+        retired, scanned = self.spatial.reconcile_against_source(
+            self.workspace, self.jage.parse_file, self.raw_watchdog._should_ignore)
+        if retired:
+            print(f"[NodeOS] Reconciled {retired} superseded node row(s) across {scanned} "
+                  f"scanned file(s).")
+        # Re-ingest when the workspace is empty OR when hydrated nodes lost their filepath
+        # (older builds omitted filepath during bulk ingestion, leaving the graph unsearchable).
+        self.purge_orphan_filepath_nodes()
+        self.spatial.all_nodes = [
+            p for p in self.spatial.all_nodes
+            if p.filepath or p.node_type not in self.CODE_NODE_TYPES
+        ]
+        self.spatial.rebuild_qtree()
+
+        # A graph whose code nodes carry no call data cannot have its dependencies
+        # rebuilt after a restart (see nodes_engine.resolve_edges safety gate). That is
+        # the state of every database written before the calls column existed.
+        # "No call data" must be judged as a RATIO, not per-node.
+        #   - `all(not p.calls ...)` is wrong in the other direction: leaf functions
+        #     legitimately call nothing, so a single empty node flips the test and
+        #     triggers a full workspace re-scan on every boot.
+        #   - `any(p.calls ...)` is wrong too: a partially migrated database keeps a
+        #     handful of populated rows and would never re-ingest, leaving most of the
+        #     dependency graph unresolvable.
+        # Require a healthy majority to consider the graph's call data usable.
+        code_nodes = [p for p in self.spatial.all_nodes
+                      if p.node_type in self.CODE_NODE_TYPES]
+        with_calls = sum(1 for p in code_nodes if p.calls)
+        missing_calls = bool(code_nodes) and (with_calls / len(code_nodes)) < 0.5
+
+        if len(self.spatial.all_nodes) == 0 or self.spatial.null_filepath_nodes or missing_calls:
+            if missing_calls:
+                print(f"[NodeOS] Only {with_calls}/{len(code_nodes)} code nodes carry call data. "
+                      f"Re-ingesting to rebuild the dependency graph.")
+            print("[NodeOS] Detected Uninitialized or Corrupt Project Workspace. Initiating Deep Ingestion...")
             # 1. Deep scan the workspace
             for root, _, files in os.walk(self.workspace):
                 if self.raw_watchdog._should_ignore(root):
@@ -254,11 +364,14 @@ Whenever operating inside this NodeOS-managed workspace, you MUST follow these c
                         filepath = os.path.join(root, file)
                         ast_nodes = self.jage.parse_file(filepath)
                         if ast_nodes:
-                            for node in ast_nodes:
-                                # We now pass the node name and the calls it makes to the spatial matrix
-                                self.spatial.add_node(node['hash'], node['type'], node.get('name', 'unknown'), node.get('calls', []))
+                            # Identical contract to the live watcher above, by construction:
+                            # both call ingest_file, so `filepath` can no longer be dropped
+                            # on one path and forwarded on the other (bug 1, Category C).
+                            self.spatial.ingest_file(filepath, ast_nodes)
             
-            # Resolve physical edges using AST calls
+            # Refresh the tick budget now that the real node count is known, then resolve
+            # physical edges. resolve_edges syncs the graph to SQLite before settling.
+            self.spatial.physics_ticks = self.spatial._budget_ticks(len(self.spatial.all_nodes))
             self.spatial.resolve_edges()
             
             print(f"[NodeOS] Deep Scan complete. Ingested {len(self.spatial.all_nodes)} kinetic nodes.")

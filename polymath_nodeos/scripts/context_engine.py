@@ -6,6 +6,19 @@ import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("ContextEngine")
 
+
+def _stable_id(text):
+    """Deterministic, process-independent id for a context key.
+
+    `hash()` on a str is salted per process (PYTHONHASHSEED), so the same entity produced
+    a different node_id on every boot. Those ids accumulated: 25 CONTEXT rows where 5
+    belong, because the DELETE-then-reinsert cycle never matched the previous ids.
+    blake2b is stable across processes, machines and Python versions, and its digest is
+    hex so it stays a valid node_id.
+    """
+    import hashlib
+    return hashlib.blake2b(str(text).encode('utf-8'), digest_size=10).hexdigest()
+
 class ContextEngine:
     """
     Built-in reasoning system for Context Storing Sub-Parent Node.
@@ -75,7 +88,7 @@ class ContextEngine:
                 
                 # 3. Insert Deduplicated Entities
                 for entity_name, desc in entities.items():
-                    node_id = f"ctx_ent_{hash(entity_name)}"
+                    node_id = "ctx_ent_" + _stable_id(entity_name)
                     cursor.execute('''
                         INSERT OR REPLACE INTO nodes (node_id, node_type, name, hash, last_updated)
                         VALUES (?, 'CONTEXT_ENTITY', ?, ?, CURRENT_TIMESTAMP)
@@ -88,7 +101,7 @@ class ContextEngine:
 
                 # 4. Insert Task States
                 for state_key, state_val in states.items():
-                    node_id = f"ctx_state_{hash(state_key)}"
+                    node_id = "ctx_state_" + _stable_id(state_key)
                     cursor.execute('''
                         INSERT OR REPLACE INTO nodes (node_id, node_type, name, hash, last_updated)
                         VALUES (?, 'CONTEXT_STATE', ?, ?, CURRENT_TIMESTAMP)

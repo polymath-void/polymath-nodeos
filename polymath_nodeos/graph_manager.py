@@ -23,11 +23,20 @@ class AGYGraphManager:
                 name TEXT,
                 filepath TEXT,
                 hash TEXT,
+                calls TEXT,
                 x_coord REAL DEFAULT 500,
                 y_coord REAL DEFAULT 500,
                 last_updated TIMESTAMP
             )
         ''')
+
+        # Migrate older databases that predate the calls column. Without it, hydration
+        # returns nodes with an empty call list and resolve_edges can never rebuild
+        # the dependency graph after a restart.
+        columns = {row[1] for row in cursor.execute("PRAGMA table_info(nodes)")}
+        if 'calls' not in columns:
+            cursor.execute("ALTER TABLE nodes ADD COLUMN calls TEXT")
+            print("[AGY-NodeOS] Migrated nodes table: added 'calls' column.")
         
         # Graph Edges (Relationships)
         cursor.execute('''
@@ -111,3 +120,5 @@ if __name__ == "__main__":
     
     swarm = InternalSwarmDispatcher(manager)
     swarm.dispatch_internal_task("code_generation", {"target": "calculator"})
+
+# touch

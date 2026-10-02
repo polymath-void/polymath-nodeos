@@ -5,6 +5,22 @@ import os
 import subprocess
 import runpy
 
+def _package_version():
+    """Read the installed distribution version so it cannot drift from pyproject.toml.
+
+    Falls back to the package's own metadata, then to 'unknown' when running from a
+    source checkout that was never installed.
+    """
+    from importlib.metadata import PackageNotFoundError, version as _dist_version
+    try:
+        return _dist_version("polymath-nodeos")
+    except PackageNotFoundError:
+        try:
+            from polymath_nodeos import __version__  # type: ignore[attr-defined]
+            return __version__
+        except Exception:
+            return "unknown"
+
 def run_daemon(run_as_daemon=False):
     """Boot the Polymath-NodeOS background daemon."""
     if run_as_daemon:
@@ -168,7 +184,8 @@ def main():
         formatter_class=argparse.RawTextHelpFormatter
     )
     
-    parser.add_argument('-v', '--version', action='version', version='Polymath-NodeOS 1.0.1')
+    parser.add_argument('-v', '--version', action='version',
+                        version=f"Polymath-NodeOS {_package_version()}")
     
     # Core actions must be mutually exclusive (choose one mode of operation)
     group = parser.add_mutually_exclusive_group(required=True)

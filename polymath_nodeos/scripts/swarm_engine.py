@@ -3,12 +3,43 @@ import os
 import asyncio
 import argparse
 
-# Add A2A-Swarm to path
-sys.path.append('/data/data/com.termux/files/home/Projects/A2A-Swarm/src/')
-from udp_node import UDPNode
+# Locate the A2A-Swarm dependency by walking up from this file rather than hardcoding one
+# developer's absolute path (Category F). A2A-Swarm is a SIBLING of this repo, not a
+# child, so search each ancestor's children. NODEOS_SWARM_SRC overrides the search.
+def _locate_swarm_src():
+    override = os.environ.get('NODEOS_SWARM_SRC')
+    if override and os.path.isdir(override):
+        return override
+    path = os.path.abspath(__file__)
+    for _ in range(6):
+        path = os.path.dirname(path)
+        candidate = os.path.join(path, 'A2A-Swarm', 'src')
+        if os.path.isdir(candidate):
+            return candidate
+    return None
+
+_SWARM_SRC = _locate_swarm_src()
+if _SWARM_SRC:
+    sys.path.append(_SWARM_SRC)
+    try:
+        from udp_node import UDPNode
+    except ImportError as exc:
+        # Present but broken: report loudly instead of failing later at construction.
+        sys.stderr.write(
+            f"[SwarmEngine] Found A2A-Swarm at {_SWARM_SRC} but could not import "
+            f"udp_node: {exc}. UDP swarm features are unavailable.\n")
+        UDPNode = None
+else:
+    sys.stderr.write(
+        "[SwarmEngine] A2A-Swarm not found in any ancestor directory; UDP swarm features "
+        "are unavailable. Set NODEOS_SWARM_SRC to the src/ directory to enable them.\n")
+    UDPNode = None
 
 class SwarmEngine:
     def __init__(self, port=9999):
+        if UDPNode is None:
+            raise RuntimeError(
+                "SwarmEngine unavailable: the A2A-Swarm dependency is not installed.")
         self.node = UDPNode(port=port, role="NodeOS-Agent")
         
     async def run_swarm(self, group, task, payload):

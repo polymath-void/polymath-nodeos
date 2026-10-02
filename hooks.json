@@ -12,7 +12,7 @@
     "PreInvocation": [
       {
         "type": "command",
-        "command": "pgrep -f 'nodeos -d' > /dev/null || (nohup nodeos -d > daemon.log 2>&1 &)",
+        "command": "pgrep -f 'nodeos.*run-as-daemon' > /dev/null || nodeos -d",
         "timeout": 5
       }
     ]

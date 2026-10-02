@@ -15,3 +15,5 @@ workflow.json
 .jsagent/
 .agents/agents/
 *.shadow
+*.bak*
+impl_task.txt
