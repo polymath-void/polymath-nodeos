@@ -61,18 +61,20 @@ Rules:
 
 ## 5. Native Codebase Context (Research Protocol)
 
-Prefer `agy_nodeos.db` over manual scans. Schema: `nodes(node_id, node_type, name, filepath, hash, calls, x_coord, y_coord, last_updated)`, `edges(source_id, target_id, relation_type)`.
+Prefer `agy_nodeos.db` over manual scans. Schema: `nodes(node_id, node_type, name, filepath, hash, calls, x_coord, y_coord, line_number, last_updated)`, `edges(source_id, target_id, relation_type)`.
 
 ```bash
-nodeos -c search <symbol>   # fast symbol lookup (exists in cli.py:run_search)
-sqlite3 agy_nodeos.db "SELECT node_type, name, filepath FROM nodes WHERE name LIKE '%<Symbol>%';"
+nodeos -c search <symbol>   # Fast symbol lookup (Returns exact filepath:line_number)
+sqlite3 agy_nodeos.db "SELECT node_type, name, filepath, line_number FROM nodes WHERE name LIKE '%<Symbol>%';"
 sqlite3 agy_nodeos.db "SELECT COUNT(*) FROM nodes; SELECT relation_type, COUNT(*) FROM edges GROUP BY 1;"
 ```
+
+**Note on Depth:** The AST engine recursively maps `ClassDef`, `FunctionDef`, nested methods, `Variable` (`ast.Assign`), and `Parameter` (`ast.arg`) nodes directly into the physics database for precision querying.
 
 Spatial / maintenance engines (all verified in `cli.py:execute_command`):
 
 - `nodeos -c ping` — daemon liveness via IPC port 6000.
-- `nodeos -c search <symbol>` — LIKE-query over `nodes`.
+- `nodeos -c search <symbol>` — LIKE-query over `nodes` (Outputs: `[node_type] name in filepath:line_number`).
 - `nodeos -c blast <filepath>` — transitive dependent blast radius.
 - `nodeos -c ghost <filepath>` — QuadTree centroid + nearest neighbors (context injection for new files).
 - `nodeos -c dead` — orphaned nodes (0 incoming edges).

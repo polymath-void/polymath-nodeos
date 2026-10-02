@@ -5,7 +5,7 @@ import sqlite3
 import sys
 
 class Point:
-    def __init__(self, x, y, node_id, node_type, mass=1.0, name="unknown", calls=None, filepath=None):
+    def __init__(self, x, y, node_id, node_type, mass=1.0, name="unknown", calls=None, filepath=None, line_number=None):
         self.x = x
         self.y = y
         self.vx = 0.0
@@ -19,6 +19,7 @@ class Point:
         self.calls = calls if calls else []
         self.edges = []
         self.filepath = filepath
+        self.line_number = line_number
 
 class Rectangle:
     def __init__(self, x, y, w, h):
@@ -99,7 +100,7 @@ class NativeNodesEngine:
         self._hydrate_xs = []
         self._hydrate_ys = []
         # Same scoping as the daemon purge: only code nodes are expected to have a filepath.
-        self.code_node_types = ("FunctionDef", "AsyncFunctionDef", "ClassDef", "JS_Node")
+        self.code_node_types = ("FunctionDef", "AsyncFunctionDef", "ClassDef", "JS_Node", "Variable", "Parameter")
         self.hydrate_from_db()
         # Tick budget scales down as the graph grows. Pure-Python Euler integration is
         # O(ticks * N * neighbourhood); a fixed 100 ticks pins a core for minutes on a
@@ -121,7 +122,7 @@ class NativeNodesEngine:
         cursor = conn.cursor()
         try:
             cursor.execute(
-                "SELECT node_id, node_type, x_coord, y_coord, name, filepath, calls FROM nodes"
+                "SELECT node_id, node_type, x_coord, y_coord, name, filepath, calls, line_number FROM nodes"
             )
             rows = cursor.fetchall()
             # Fit the boundary to the incoming rows BEFORE inserting any of them. Inserting
@@ -162,8 +163,9 @@ class NativeNodesEngine:
                                 calls = [str(c) for c in parsed]
                         except (TypeError, ValueError):
                             calls = []
+                    line_number = row[7] if len(row) > 7 else None
                     p = Point(row[2], row[3], row[0], row[1], name=name,
-                              calls=calls, filepath=filepath)
+                              calls=calls, filepath=filepath, line_number=line_number)
                     self.all_nodes.append(p)
                     # Do NOT ignore the return: insert() returns False for an out-of-bounds
                     # point and never raises. Count the loss so it is reported, not silent.
@@ -477,16 +479,17 @@ class NativeNodesEngine:
             # call lists and the dependency graph cannot be rebuilt.
             calls_json = json.dumps(sorted(p.calls))
             cursor.execute('''
-                INSERT INTO nodes (node_id, node_type, name, filepath, calls, x_coord, y_coord, last_updated)
-                VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                INSERT INTO nodes (node_id, node_type, name, filepath, calls, x_coord, y_coord, line_number, last_updated)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(node_id) DO UPDATE SET 
                     name=excluded.name, 
                     filepath=excluded.filepath,
                     calls=excluded.calls,
                     x_coord=excluded.x_coord, 
                     y_coord=excluded.y_coord, 
+                    line_number=excluded.line_number,
                     last_updated=excluded.last_updated
-            ''', (p.node_id, p.node_type, p.name, p.filepath, calls_json, p.x, p.y))
+            ''', (p.node_id, p.node_type, p.name, p.filepath, calls_json, p.x, p.y, p.line_number))
         conn.commit()
         conn.close()
 
@@ -510,7 +513,7 @@ class NativeNodesEngine:
                 continue
             self.add_node(node_id, node.get('type', 'unknown'),
                           node.get('name', 'unknown'), node.get('calls', []),
-                          filepath=filepath)
+                          filepath=filepath, line_number=node.get('line_number'))
             live_hashes.add(node_id)
         self.retire_superseded_nodes(filepath, live_hashes)
         return live_hashes
@@ -671,14 +674,14 @@ class NativeNodesEngine:
             sys.stderr.write(f"[Physics Engine] Could not purge rows for {filepath}: {exc}\n")
             return 0
 
-    def add_node(self, node_id, node_type, name="unknown", calls=None, parent_x=500, parent_y=500, filepath=None):
+    def add_node(self, node_id, node_type, name="unknown", calls=None, parent_x=500, parent_y=500, filepath=None, line_number=None):
         import random
         drop_x = parent_x + random.uniform(-10, 10)
         drop_y = parent_y + random.uniform(-10, 10)
         
         existing = next((n for n in self.all_nodes if n.node_id == node_id), None)
         if not existing:
-            p = Point(drop_x, drop_y, node_id, node_type, name=name, calls=calls, filepath=filepath)
+            p = Point(drop_x, drop_y, node_id, node_type, name=name, calls=calls, filepath=filepath, line_number=line_number)
             self.all_nodes.append(p)
             sys.stderr.write(f"[Physics Engine] Dropped {node_type} '{name}' into kinetic simulation.\n")
             return p
@@ -688,4 +691,6 @@ class NativeNodesEngine:
                 existing.filepath = filepath
             if calls:
                 existing.calls = calls
+            if line_number:
+                existing.line_number = line_number
             return existing

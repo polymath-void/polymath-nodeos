@@ -26,6 +26,7 @@ class AGYGraphManager:
                 calls TEXT,
                 x_coord REAL DEFAULT 500,
                 y_coord REAL DEFAULT 500,
+                line_number INTEGER,
                 last_updated TIMESTAMP
             )
         ''')
@@ -37,6 +38,9 @@ class AGYGraphManager:
         if 'calls' not in columns:
             cursor.execute("ALTER TABLE nodes ADD COLUMN calls TEXT")
             print("[AGY-NodeOS] Migrated nodes table: added 'calls' column.")
+        if 'line_number' not in columns:
+            cursor.execute("ALTER TABLE nodes ADD COLUMN line_number INTEGER")
+            print("[AGY-NodeOS] Migrated nodes table: added 'line_number' column.")
         
         # Graph Edges (Relationships)
         cursor.execute('''

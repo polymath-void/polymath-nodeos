@@ -136,7 +136,7 @@ def execute_command(command, command_args):
         con = sqlite3.connect(db_path)
         try:
             rows = con.execute(
-                "SELECT node_type, name, filepath FROM nodes WHERE name LIKE ?",
+                "SELECT node_type, name, filepath, line_number FROM nodes WHERE name LIKE ?",
                 (f"%{symbol}%",),
             ).fetchall()
         finally:
@@ -144,8 +144,9 @@ def execute_command(command, command_args):
         if not rows:
             print(f"No results for '{symbol}'.")
             return
-        for node_type, name, filepath in rows:
-            print(f"Found [{node_type}] {name} in {filepath}")
+        for node_type, name, filepath, line_number in rows:
+            suffix = f":{line_number}" if line_number else ""
+            print(f"Found [{node_type}] {name} in {filepath}{suffix}")
 
     commands = {
         "ping": lambda args: _ping_daemon(),
