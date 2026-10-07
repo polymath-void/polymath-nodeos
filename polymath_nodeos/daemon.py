@@ -212,6 +212,34 @@ class AGYNodeOSEventHandler:
                                 
                             with open(workflow_file, 'w') as f: json.dump(workflow, f, indent=4)
                             continue
+
+                        if workflow.get('action') == 'local_model' or workflow.get('type') == 'Local_Model_Task':
+                            prompt = workflow.get('prompt', '')
+                            model_path = workflow.get('model_path', '')
+                            symbol = workflow.get('symbol', '')
+                            max_tokens = workflow.get('max_tokens', 512)
+                            print(f"[Swarm Dispatcher] Routing Local Model Task to Polymath-AI...")
+                            workflow['status'] = 'running'
+                            with open(workflow_file, 'w') as f: json.dump(workflow, f, indent=4)
+
+                            try:
+                                from polymath_ai.manager import PolymathAIManager
+                                ai_manager = PolymathAIManager()
+                                output = ai_manager.generate(
+                                    prompt=prompt,
+                                    model_path=model_path or None,
+                                    max_tokens=max_tokens,
+                                    symbol_lookup=symbol
+                                )
+                                workflow['status'] = 'completed'
+                                workflow['result'] = output
+                            except Exception as model_err:
+                                workflow['status'] = 'failed_execution'
+                                workflow['error_log'] = str(model_err)
+
+                            with open(workflow_file, 'w') as f: json.dump(workflow, f, indent=4)
+                            print(f"[Event Loop] Local Model Task completed by Polymath-AI.")
+                            continue
                             
                         # Handle Swarm Agent execution
                         agent_list = workflow.get('agents', [])
